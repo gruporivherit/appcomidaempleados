@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Comida de empleados</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="icono-app.png">
+    <link rel="apple-touch-icon" href="icono-app.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Comida Emp.">
+    <meta name="theme-color" content="#004731">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database-compat.js"></script>
+    
+    <style>
+        :root { --mc-green:#004731; --mc-yellow:rgb(255,204,0); --mc-white:#ffffff; --text-dark:#222222; --border-light:#e0e0e0; --mc-red:#d32f2f; }
+        *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent;}
+        body{background:#f0f2f0;color:var(--text-dark);min-height:100vh;display:flex;flex-direction:column;}
+        header{background:var(--mc-green);color:var(--mc-white);padding:0.8rem 2rem;display:flex;align-items:center;justify-content:center;gap:1.2rem;box-shadow:0 4px 10px rgba(0,0,0,0.3);border-bottom:4px solid var(--mc-yellow);cursor:pointer;}
+        header:active{opacity:0.8;}
+        header img{height:45px;width:45px;border-radius:4px;object-fit:cover;}
+        header h1{font-size:1.2rem;font-weight:800;text-align:center;}
+        #loginScreen{flex:1;display:flex;align-items:center;justify-content:center;padding:1rem;}
+        .login-card{background:var(--mc-white);border-radius:15px;padding:2rem;box-shadow:0 10px 30px rgba(0,0,0,0.1);width:100%;max-width:400px;text-align:center;border-top:6px solid var(--mc-green);}
+        .login-card h2{color:var(--mc-green);margin-bottom:1.5rem;font-size:1.5rem;font-weight:900;}
+        select,input[type="password"]{width:100%;padding:1rem;border-radius:10px;border:2px solid #ddd;font-size:1rem;margin-bottom:1rem;font-weight:bold;}
+        #appScreen{display:none;flex-direction:column;width:100%;}
+        main{flex:1;padding:1rem;max-width:850px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:1rem;}
+        .banner-closed{display:none;background:var(--mc-red);color:white;padding:1rem;border-radius:12px;text-align:center;font-weight:800;box-shadow:0 4px 15px rgba(211,47,47,0.2);font-size:0.95rem;cursor:pointer;transition:transform 0.2s;}
+        .banner-closed:active{transform:scale(0.98);}
+        .card{background:var(--mc-white);border-radius:15px;padding:1rem;box-shadow:0 4px 15px rgba(0,0,0,0.05);border:1px solid var(--border-light);}
+        .field-group{margin-bottom:1.2rem;}
+        label.title-label{display:block;font-size:0.8rem;margin-bottom:0.5rem;font-weight:800;color:var(--mc-green);text-transform:uppercase;}
+        .step-highlight{color:var(--mc-yellow);font-size:1.1rem;margin-right:4px;font-weight:900;}
+        input[type="text"],input[type="number"]{width:100%;padding:0.7rem;border-radius:10px;border:2px solid #ddd;font-size:0.95rem;transition:opacity 0.3s;}
+        input:disabled{background-color:#f5f5f5;cursor:not-allowed;}
+        input[type="date"]::-webkit-clear-button,input[type="date"]::-webkit-inner-spin-button{display:none;-webkit-appearance:none;}
+        .products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:0.5rem;}
+        .product-item,.btn-coffee{display:flex;align-items:center;justify-content:center;text-align:center;min-height:45px;padding:0.5rem;border:2px solid #eee;border-radius:10px;cursor:pointer;font-size:0.85rem;background:#fafafa;color:var(--text-dark);transition:all 0.2s ease;}
+        .btn-coffee{flex:1;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-weight:normal;font-size:0.85rem;}
+        .product-item input{display:none;}
+        .product-item:has(input:checked){background-color:var(--mc-yellow)!important;border-color:var(--mc-yellow);font-weight:900;}
+        .disabled-item{opacity:0.5;pointer-events:none;cursor:not-allowed!important;}
+        .btn-main{width:100%;padding:1rem;border-radius:12px;border:none;cursor:pointer;font-size:1.1rem;font-weight:800;background:var(--mc-green);color:white;margin-top:0.5rem;transition:opacity 0.3s;}
+        .btn-main:disabled{opacity:0.5;cursor:not-allowed;}
+        .btn-danger{background:var(--mc-red);box-shadow:0 4px 15px rgba(211,47,47,0.2);}
+        .quick-section{margin-top:2rem;padding-top:1.5rem;border-top:2px dashed #ddd;}
+        .quick-controls{display:flex;gap:0.5rem;align-items:stretch;margin-top:0.5rem;}
+        .quick-qty-input{width:70px!important;text-align:center;font-weight:700;font-size:1.1rem!important;}
+        .btn-coffee:not(:disabled):active{transform:scale(0.95);}
+        .history{margin-top:1.5rem;border-top:2px solid #f0f0f0;padding-top:0.8rem;}
+        .history-item{padding:0.6rem 0;border-bottom:1px solid #f8f8f8;font-size:0.95rem;display:flex;align-items:flex-start;}
+        .emp-name-col{width:140px;flex-shrink:0;font-weight:700;display:flex;align-items:flex-start;}
+        .emp-name-text{word-break:break-word;line-height:1.2;}
+        .mc-separator{color:var(--mc-yellow);font-weight:900;padding:0 8px;line-height:1.2;}
+        .food-list-col{flex:1;color:#555;line-height:1.4;font-size:0.75rem;margin-top:0.1rem;}
+        .summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.5rem;margin-bottom:1.5rem;}
+        .summary-cat-box{background:#f9f9f9;border-radius:8px;padding:0.6rem;border-left:4px solid var(--mc-green);}
+        .summary-cat-box h4{font-size:0.7rem;color:var(--mc-green);margin-bottom:0.4rem;border-bottom:1px solid #eee;padding-bottom:2px;}
+        .summary-item{display:flex;justify-content:space-between;font-size:0.85rem;padding:2px 0;}
+        .date-controls{display:flex;align-items:center;gap:0.5rem;background:#f0f0f0;padding:0.3rem 0.6rem;border-radius:50px;}
+        .btn-nav{background:var(--mc-green);color:white;border:none;width:28px;height:28px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0.8rem;}
+        .admin-modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;padding:1rem;}
+        .editor-card{background:white;border-radius:15px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;padding:1.5rem;}
+        .editor-card h2{color:var(--mc-green);margin-bottom:0.5rem;font-size:1.2rem;text-align:center;}
+        .editor-category{margin-bottom:1.5rem;background:#f9f9f9;padding:1rem;border-radius:10px;}
+        .editor-category h4{color:var(--mc-green);margin-bottom:0.5rem;font-size:0.9rem;}
+        .editor-item{display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0;border-bottom:1px solid #eee;font-size:0.85rem;}
+        .btn-delete{background:var(--mc-red);color:white;border:none;border-radius:5px;padding:0.2rem 0.5rem;cursor:pointer;font-size:0.7rem;font-weight:bold;}
+        .editor-add-row{display:flex;gap:0.5rem;margin-top:0.5rem;}
+        .editor-add-row input{padding:0.4rem;font-size:0.85rem;border-radius:5px;flex:1;margin-bottom:0;border:2px solid #ccc;}
+        .btn-add{background:var(--mc-green);color:white;border:none;border-radius:5px;padding:0.4rem 0.8rem;cursor:pointer;font-weight:bold;font-size:0.8rem;}
+        .pin-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;padding:0.5rem;background:#f9f9f9;border-radius:8px;}
+        .pin-row label{font-weight:bold;font-size:0.9rem;color:var(--mc-green);flex:1;}
+        .pin-row input{width:100px;text-align:center;padding:0.5rem;font-weight:bold;border:2px solid #ccc;border-radius:6px;margin-bottom:0;}
+        .btn-close-modal{width:100%;padding:1rem;border-radius:10px;border:none;background:#333;color:white;font-weight:bold;cursor:pointer;margin-top:1rem;}
+        .input-modal-pin{width:100%;padding:1rem;border-radius:10px;border:2px solid #ddd;font-size:1.2rem;text-align:center;font-weight:bold;margin-bottom:1rem;}
+        #graciasModal .editor-card{background:var(--mc-green);color:white;border:4px solid var(--mc-yellow);cursor:pointer;box-shadow:0 10px 40px rgba(0,0,0,0.5);transition:transform 0.2s;}
+        #graciasModal .editor-card:active{transform:scale(0.95);}
+        @media(max-width:600px){.summary-grid{grid-template-columns:1fr;}header h1{font-size:1rem;}.emp-name-col{width:110px;}}
+    </style>
+</head>
+<body>
+
+<header onclick="prepararAdminAuth('panel')" title="Haz clic para acceso administrativo">
+    <img src="logos1080x1080pxfondoverde.jpg" alt="Logo">
+    <h1 id="headerTitle">Comida de empleados</h1>
+</header>
+
+<div id="loginScreen">
+    <div class="login-card">
+        <h2>ACCESO ENCARGADOS</h2>
+        <select id="selectRestaurante"></select>
+        <input type="password" inputmode="numeric" pattern="[0-9]*" id="inputPin" placeholder="Introduce el PIN">
+        <button class="btn-main" onclick="verificarLogin()">ENTRAR AL SISTEMA</button>
+    </div>
+</div>
+
+<div id="appScreen">
+    <main>
+        <div id="closedBanner" class="banner-closed" onclick="prepararAdminAuth('reabrir')">🔒 DÍA CERRADO</div>
+        <div class="card">
+            <div class="field-group">
+                <label class="title-label" for="employeeInput">NOMBRE DEL EMPLEADO/A</label>
+                <input type="text" id="employeeInput" placeholder="Escribe tu nombre y apellido aquí...">
+            </div>
+            <div class="field-group" id="menuForms">
+                <label class="title-label"><span class="step-highlight">1º</span> PRINCIPAL</label>
+                <div class="products-grid" id="row1"></div>
+                <label class="title-label" style="margin-top:0.8rem;"><span class="step-highlight">2º</span> COMPLEMENTO</label>
+                <div class="products-grid" id="row2"></div>
+                <label class="title-label" style="margin-top:0.8rem;"><span class="step-highlight">3º</span> BEBIDA</label>
+                <div class="products-grid" id="row3"></div>
+                <label class="title-label" style="margin-top:0.8rem;"><span class="step-highlight">4º</span> POSTRE</label>
+                <div class="products-grid" id="row4"></div>
+            </div>
+            <button id="btnGuardarMenu" class="btn-main" onclick="registerConsumo()">GUARDAR MENÚ</button>
+            <div class="quick-section">
+                <label class="title-label"><span class="step-highlight">5º</span> CAFÉS</label>
+                <div class="quick-controls">
+                    <input type="number" inputmode="numeric" pattern="[0-9]*" id="coffeeQty" class="quick-qty-input" value="1" min="1" placeholder="Nº">
+                    <div id="row5_buttons" style="display:flex;gap:0.5rem;flex:1;flex-wrap:wrap;"></div>
+                </div>
+            </div>
+            <div class="quick-section" style="margin-top:1rem;border-top:none;padding-top:0;">
+                <label class="title-label"><span class="step-highlight">6º</span> SALSAS</label>
+                <div class="quick-controls">
+                    <input type="number" inputmode="numeric" pattern="[0-9]*" id="sauceQty" class="quick-qty-input" value="1" min="1" placeholder="Nº">
+                    <div id="row6_buttons" style="display:flex;gap:0.5rem;flex:1;flex-wrap:wrap;"></div>
+                </div>
+            </div>
+            <div class="history">
+                <label style="font-weight:800;font-size:0.7rem;color:#888;text-transform:uppercase;">Registros del día (Sincronizado)</label>
+                <div id="historyContainer"></div>
+            </div>
+            <button id="btnFinalizar" class="btn-main btn-danger" style="margin-top:1rem;" onclick="abrirModalCierre()">CERRAR DÍA (ver totales)</button>
+        </div>
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+                <h3 style="font-size:0.9rem;">TOTALES POR CATEGORÍA</h3>
+                <div class="date-controls">
+                    <button class="btn-nav" onclick="changeDate(-1)">❮</button>
+                    <input type="date" id="datePicker" style="border:none;background:transparent;font-size:0.85rem;width:125px;text-align:center;outline:none;">
+                    <button class="btn-nav" onclick="changeDate(1)">❯</button>
+                </div>
+            </div>
+            <div id="summaryGrid" class="summary-grid"></div>
+        </div>
+    </main>
+</div>
+
+<div id="adminAuthModal" class="admin-modal">
+    <div class="editor-card" style="max-width:350px;text-align:center;">
+        <h2>ZONA RESTRINGIDA</h2>
+        <p style="margin-bottom:1.5rem;font-size:0.9rem;font-weight:bold;color:#555;">Introduce el PIN Maestro para continuar.</p>
+        <input type="password" inputmode="numeric" pattern="[0-9]*" id="inputAdminPin" class="input-modal-pin" placeholder="PIN Maestro">
+        <button class="btn-main" onclick="verificarAdminPin()">ACCEDER</button>
+        <button class="btn-close-modal" onclick="document.getElementById('adminAuthModal').style.display='none'" style="margin-top:0.8rem;background:#ccc;color:#333;">CANCELAR</button>
+    </div>
+</div>
+
+<div id="closeDayModal" class="admin-modal">
+    <div class="editor-card" style="max-width:350px;text-align:center;border-top:6px solid var(--mc-red);">
+        <h2 style="color:var(--mc-red);">CIERRE DE DÍA</h2>
+        <p style="margin-bottom:1.5rem;font-size:0.9rem;font-weight:bold;color:#555;">Introduce el PIN del restaurante para enviar los datos.</p>
+        <input type="password" inputmode="numeric" pattern="[0-9]*" id="inputClosePin" class="input-modal-pin" placeholder="PIN de cierre">
+        <button class="btn-main btn-danger" onclick="confirmarCierre()">CONFIRMAR Y ENVIAR</button>
+        <button class="btn-close-modal" onclick="document.getElementById('closeDayModal').style.display='none'" style="margin-top:0.8rem;background:#ccc;color:#333;">CANCELAR</button>
+    </div>
+</div>
+
+<div id="graciasModal" class="admin-modal" onclick="this.style.display='none'">
+    <div class="editor-card" style="max-width:300px;text-align:center;">
+        <h2 style="color:white;font-size:1.8rem;margin-bottom:0;">¡GRACIAS! 🎉</h2>
+        <p style="font-size:1.1rem;font-weight:bold;margin-top:1rem;color:white;">Que aproveche</p>
+        <p style="font-size:0.8rem;margin-top:1.5rem;opacity:0.9;color:white;">(Toca la pantalla para continuar)</p>
+    </div>
+</div>
+
+<div id="menuEditorModal" class="admin-modal">
+    <div class="editor-card">
+        <h2>🛠️ GESTOR DE MENÚ</h2>
+        <p id="editorMenuSubtitle" style="font-size:0.8rem;color:#666;margin-bottom:1rem;text-align:center;">Editando menú de...</p>
+        <div id="editorContent"></div>
+        <button onclick="resetearMenuBase()" style="width:100%;padding:0.7rem;border-radius:10px;border:2px dashed #d32f2f;background:white;color:#d32f2f;font-weight:bold;cursor:pointer;margin-top:0.5rem;font-size:0.85rem;">🔄 RESTABLECER MENÚ BASE</button>
+        <button class="btn-close-modal" onclick="cerrarEditorMenu()">GUARDAR Y CERRAR</button>
+    </div>
+</div>
+
+<div id="pinEditorModal" class="admin-modal">
+    <div class="editor-card">
+        <h2>🔑 GESTOR RESTAURANTES</h2>
+        <p style="font-size:0.8rem;color:#666;margin-bottom:1rem;text-align:center;">Añade, elimina o cambia el PIN de los restaurantes.</p>
+        <div id="pinEditorContent"></div>
+        <div class="editor-add-row" style="margin-top:1.5rem;border-top:2px dashed #eee;padding-top:1rem;">
+            <input type="text" id="newRestName" placeholder="Nuevo restaurante..." style="text-transform:uppercase;">
+            <input type="text" inputmode="numeric" id="newRestPin" placeholder="PIN" style="width:80px;text-align:center;" maxlength="4">
+            <button class="btn-add" onclick="añadirRestaurante()">AÑADIR</button>
+        </div>
+        <button class="btn-main" onclick="guardarPINs()" style="margin-top:1.5rem;">GUARDAR CAMBIOS</button>
+        <button class="btn-close-modal" onclick="cerrarGestorPINs()" style="margin-top:0.5rem;">CANCELAR</button>
+    </div>
+</div>
+
+<script>
+// CONFIGURACIÓN DE FIREBASE ACTUALIZADA
+var firebaseConfig = {
+  apiKey: "AIzaSyAGD13DpZvyAaaV-60OS0_LZPL6ZBwfmOo",
+  authDomain: "appcomidaempleados.firebaseapp.com",
+  databaseURL: "https://appcomidaempleados-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "appcomidaempleados",
+  storageBucket: "appcomidaempleados.firebasestorage.app",
+  messagingSenderId: "1075222714539",
+  appId: "1:1075222714539:web:9f53bb8fa67cc92feaffee",
+  measurementId: "G-S6WGFFGESL"
+};
+
+// Inicializamos la app y Realtime Database
+firebase.initializeApp(firebaseConfig);
+var db = firebase.database();
+
+// ── PINs ── Solo existen aquí. Nunca se guardan en Firebase.
+var PIN_GESTOR = "0112";
+var PIN_ADMIN  = "9999";
+
+var accesos = {
+    "TORREVIEJA":        "0001",
+    "PETRER":            "0002",
+    "PUNTA MARINA":      "5814",
+    "LA ZENIA":          "9574",
+    "BENIJOFAR":         "0005",
+    "IBI":               "0006",
+    "YECLA":             "0007",
+    "TORREVIEJA PUERTO": "0008",
+    "PRUEBAS":           "6666",
+    "PLAZA MAR 2":       "0009"
+};
+
+// ── Menú base ──
+var defaultMenu = {
+    row1: ["Big Mac","McPollo","McRoyal","Cuarto de libra","Cheese burger","Chicken burger"],
+    row2: ["Patatas pequeñas","Patatas medianas","Patatas deluxe","Ensalada de la huerta"],
+    row3: ["Coca Cola","Fanta de Naranja","Sprite","Aquarius"],
+    row4: ["Sundae chocolate","Sundae caramelo","McFlurry Kit kat","McFlurry Oreo"],
+    row5: ["Café","Café con leche"],
+    row6: ["Salsa BBQ","Salsa Deluxe","Ketchup"]
+};
+
+// ── Menús personalizados (tienen prioridad absoluta sobre Firebase) ──
+var todosLosMenus = {
+    "PUNTA MARINA": {
+        row1: ["Big Mac","McPollo","McRoyal","Cuarto de libra","Cheese burger","Doble cheeseburguer","Filete de pescado","McMuffin salchicha","McMuffin bacon","Tostada con tomate"],
+        row2: ["Patatas pequeñas","Patatas medianas","Patatas deluxe","Ensalada de la huerta","Ensalada César","Bolsa manzana"],
+        row3: ["Coca Cola","Coca Cola Zero","Fanta de Naranja","Sprite","Aquarius","Agua","Zumo naranja","Zumo manzana","Nesquik","Manzanilla"],
+        row4: ["Sundae chocolate","Sundae caramelo","Sundae c.blanco","KitKat chocolate","KitKat caramelo","KitKat blanco","Oreo chocolate","Oreo blanco","Chipsahoy chocolate","Chipsahoy blanco","Cafe con helado"],
+        row5: ["Café","Café con leche","Espresso"],
+        row6: ["Salsa BBQ","Salsa Deluxe","Ketchup"]
+    },
+    "LA ZENIA": {
+        row1: ["Big Mac","McPollo","McRoyal","Cuarto de libra","Cheese burger","Chicken burger","Doble cheese","Filete de pescado","McMuffin Salchicha","Chicken & Cheese","Tostada con tomate"],
+        row2: ["Patatas pequeñas","Patatas medianas","Patatas deluxe","Ensalada de la huerta","Manzana","Apple pie"],
+        row3: ["Coca Cola","Coca Cola Zero","Fanta de Naranja","Sprite","Aquarius","Agua"],
+        row4: ["Sundae caramelo"],
+        row5: ["Café","Café con leche"],
+        row6: ["Salsa BBQ","Salsa Deluxe","Ketchup","Mayonesa","Salsa Buffalo"]
+    }
+};
+
+// Restaurantes cuyos menús NUNCA se sobreescriben desde Firebase
+var MENUS_FIJOS = ["PUNTA MARINA","LA ZENIA"];
+
+var categoryNames = {row1:"PRINCIPALES",row2:"COMPLEMENTOS",row3:"BEBIDAS",row4:"POSTRES",row5:"CAFÉS",row6:"SALSAS"};
+
+var currentMenu = {};
+var restauranteActual = "";
+var accionAdminPendiente = "";
+var records = [];
+var closedDays = JSON.parse(localStorage.getItem('mc_closed_days_v7') || '[]');
+var lastChecked = {};
+
+// Variables para los listeners de Realtime Database
+var refConsumos, cbConsumos;
+var refCierres, cbCierres;
+
+// ── NUEVO SISTEMA DE FECHAS (Global Date Object) ──
+var globalDate = new Date();
+globalDate.setHours(12, 0, 0, 0);
+
+function getFormattedDate(d) {
+    var copia = new Date(d.getTime());
+    // Si la hora es entre las 00:00 y las 04:59, restamos un día
+    if (copia.getHours() < 5) {
+        copia.setDate(copia.getDate() - 1);
+    }
+    return copia.getFullYear() + '-' + 
+           String(copia.getMonth() + 1).padStart(2, '0') + '-' + 
+           String(copia.getDate()).padStart(2, '0');
+}
+
+var selectedDate = getFormattedDate(globalDate);
+document.getElementById('datePicker').value = selectedDate;
+
+// ── Rellenar menús base para restaurantes sin menú propio ──
+function inicializarMenusLocales() {
+    Object.keys(accesos).forEach(function(rest) {
+        if (!todosLosMenus[rest]) {
+            todosLosMenus[rest] = JSON.parse(JSON.stringify(defaultMenu));
+        } else {
+            ['row1','row2','row3','row4','row5','row6'].forEach(function(r) {
+                if (!todosLosMenus[rest][r] || todosLosMenus[rest][r].length === 0) {
+                    todosLosMenus[rest][r] = JSON.parse(JSON.stringify(defaultMenu[r]));
+                }
+            });
+        }
+    });
+}
+
+// ── Cargar el select de restaurantes ──
+function cargarSelectRestaurantes() {
+    var sel = document.getElementById('selectRestaurante');
+    if (!sel) return;
+    var val = sel.value;
+    sel.innerHTML = '<option value="">Selecciona tu restaurante...</option>';
+    Object.keys(accesos).forEach(function(rest) {
+        sel.innerHTML += '<option value="' + rest + '">' + rest + '</option>';
+    });
+    if (accesos[val]) sel.value = val;
+}
+
+// ── Sincronización Firebase (Realtime Database) ──
+function escucharConfiguracionNube() {
+    db.ref("config/app_config").on('value', function(snapshot) {
+        if (snapshot.exists()) {
+            var data = snapshot.val();
+            if (data && data.menus) {
+                Object.keys(data.menus).forEach(function(rest) {
+                    // Solo sobreescribir si NO es menú fijo
+                    if (MENUS_FIJOS.indexOf(rest) === -1) {
+                        todosLosMenus[rest] = data.menus[rest];
+                    }
+                });
+            }
+        }
+        // Rellenar huecos
+        Object.keys(accesos).forEach(function(rest) {
+            if (!todosLosMenus[rest]) {
+                todosLosMenus[rest] = JSON.parse(JSON.stringify(defaultMenu));
+            } else {
+                ['row1','row2','row3','row4','row5','row6'].forEach(function(r) {
+                    if (!todosLosMenus[rest][r] || todosLosMenus[rest][r].length === 0) {
+                        todosLosMenus[rest][r] = JSON.parse(JSON.stringify(defaultMenu[r]));
+                    }
+                });
+            }
+        });
+        // Subir estado correcto a Firebase
+        guardarMenusEnNube();
+        
+        // Refrescar UI si hay restaurante activo
+        if (restauranteActual) {
+            currentMenu = todosLosMenus[restauranteActual] || JSON.parse(JSON.stringify(defaultMenu));
+            renderMenu();
+            renderDayData();
+            if (document.getElementById('menuEditorModal').style.display === 'flex') renderModalEditor();
+        }
+    });
+}
+
+function guardarMenusEnNube() {
+    db.ref("config/app_config").update({menus: todosLosMenus});
+}
+function guardarConfigEnNube() { guardarMenusEnNube(); }
+
+// ── Login ──
+function verificarLogin() {
+    var rest = document.getElementById('selectRestaurante').value;
+    var pin  = document.getElementById('inputPin').value;
+    if (!rest) return alert("Por favor, selecciona tu restaurante.");
+    if (accesos[rest] === pin || pin === PIN_ADMIN || pin === PIN_GESTOR) {
+        restauranteActual = rest;
+        currentMenu = todosLosMenus[rest] || JSON.parse(JSON.stringify(defaultMenu));
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appScreen').style.display = 'flex';
+        document.getElementById('headerTitle').innerText = 'Comida empleados - ' + rest;
+        document.getElementById('datePicker').value = selectedDate;
+        renderMenu();
+        updateUIState();
+        escucharDatosFirebase();
+    } else {
+        alert("⚠️ PIN incorrecto para el restaurante seleccionado.");
+    }
+}
+
+// ── Admin auth ──
+function prepararAdminAuth(accion) {
+    accionAdminPendiente = accion;
+    document.getElementById('inputAdminPin').value = '';
+    document.getElementById('adminAuthModal').style.display = 'flex';
+}
+
+function verificarAdminPin() {
+    var pin = document.getElementById('inputAdminPin').value;
+    if (accionAdminPendiente === 'panel') {
+        if (document.getElementById('loginScreen').style.display !== 'none') {
+            if (pin === PIN_GESTOR) {
+                document.getElementById('adminAuthModal').style.display = 'none';
+                abrirGestorPINs();
+            } else {
+                alert("⚠️ PIN maestro incorrecto para el Gestor de Restaurantes.");
+            }
+        } else {
+            if (pin === PIN_ADMIN) {
+                document.getElementById('adminAuthModal').style.display = 'none';
+                abrirEditorMenu();
+            } else {
+                alert("⚠️ PIN maestro incorrecto para el Gestor de Menú.");
+            }
+        }
+    } else if (accionAdminPendiente === 'reabrir') {
+        if (pin === PIN_ADMIN) {
+            document.getElementById('adminAuthModal').style.display = 'none';
+            db.ref("dias_cerrados/" + restauranteActual + "_" + selectedDate).remove();
+            alert("🔓 Día reabierto correctamente.");
+        } else {
+            alert("⚠️ PIN maestro incorrecto para reabrir el día.");
+        }
+    }
+}
+
+// ── Gestor PINs ──
+function abrirGestorPINs() {
+    var html = '';
+    Object.keys(accesos).forEach(function(rest) {
+        var sid = rest.replace(/\s/g,'_');
+        html += '<div class="pin-row">';
+        html += '<button class="btn-delete" style="margin-right:0.5rem;padding:0.3rem 0.6rem;" onclick="eliminarRestaurante(\'' + rest + '\')">X</button>';
+        html += '<label>' + rest + '</label>';
+        html += '<input type="text" id="pinInput_' + sid + '" value="' + accesos[rest] + '" maxlength="4">';
+        html += '</div>';
+    });
+    document.getElementById('pinEditorContent').innerHTML = html;
+    document.getElementById('pinEditorModal').style.display = 'flex';
+}
+
+function eliminarRestaurante(rest) {
+    if (confirm('¿Seguro que quieres eliminar "' + rest + '"?')) {
+        delete accesos[rest];
+        delete todosLosMenus[rest];
+        guardarMenusEnNube();
+        cargarSelectRestaurantes();
+        abrirGestorPINs();
+    }
+}
+
+function añadirRestaurante() {
+    var name = document.getElementById('newRestName').value.trim().toUpperCase();
+    var pin  = document.getElementById('newRestPin').value.trim();
+    if (!name || !pin) return alert("Escribe el nombre y un PIN de 4 dígitos.");
+    if (accesos[name]) return alert("Ese restaurante ya existe.");
+    accesos[name] = pin;
+    todosLosMenus[name] = JSON.parse(JSON.stringify(defaultMenu));
+    guardarMenusEnNube();
+    cargarSelectRestaurantes();
+    document.getElementById('newRestName').value = '';
+    document.getElementById('newRestPin').value = '';
+    abrirGestorPINs();
+}
+
+function guardarPINs() {
+    Object.keys(accesos).forEach(function(rest) {
+        var sid = rest.replace(/\s/g,'_');
+        var el = document.getElementById('pinInput_' + sid);
+        if (el && el.value.trim() !== '') accesos[rest] = el.value.trim();
+    });
+    alert("✅ Contraseñas actualizadas correctamente.");
+    cerrarGestorPINs();
+}
+
+function cerrarGestorPINs() { document.getElementById('pinEditorModal').style.display = 'none'; }
+
+// ── Render menú ──
+function renderMenu() {
+    ['row1','row2','row3','row4'].forEach(function(rowId) {
+        var c = document.getElementById(rowId);
+        if (c && currentMenu[rowId]) {
+            c.innerHTML = currentMenu[rowId].map(function(p) {
+                return '<label class="product-item"><input type="radio" name="' + rowId + '" value="' + p + '" onclick="toggleRadio(this)"><span>' + p + '</span></label>';
+            }).join('');
+        }
+    });
+    var c5 = document.getElementById('row5_buttons');
+    if (c5 && currentMenu.row5) {
+        c5.innerHTML = currentMenu.row5.map(function(p) {
+            return '<button class="btn-coffee" onclick="addQuickItem(\'' + p + '\',this,\'coffeeQty\')">' + p + '</button>';
+        }).join('');
+    }
+    var c6 = document.getElementById('row6_buttons');
+    if (c6 && currentMenu.row6) {
+        c6.innerHTML = currentMenu.row6.map(function(p) {
+            return '<button class="btn-coffee" onclick="addQuickItem(\'' + p + '\',this,\'sauceQty\')">' + p + '</button>';
+        }).join('');
+    }
+}
+
+function toggleRadio(el) {
+    if (closedDays.indexOf(restauranteActual + "_" + selectedDate) !== -1) return;
+    if (lastChecked[el.name] === el) { el.checked = false; lastChecked[el.name] = null; }
+    else { lastChecked[el.name] = el; }
+}
+
+// ── Estado UI ──
+function updateUIState() {
+    var lockKey = restauranteActual + "_" + selectedDate;
+    var isClosed = closedDays.indexOf(lockKey) !== -1;
+    var banner = document.getElementById('closedBanner');
+    if (isClosed) {
+        var p = selectedDate.split('-');
+        var diasSemana = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+        var fechaObj = new Date(parseInt(p[0],10), parseInt(p[1],10)-1, parseInt(p[2],10));
+        var diaSemana = diasSemana[fechaObj.getDay()];
+        banner.style.display = 'block';
+        banner.innerText = '🔒 DÍA CERRADO - ' + diaSemana + ' ' + p[2] + '/' + p[1] + '/' + p[0];
+    } else {
+        banner.style.display = 'none';
+    }
+    var btn = document.getElementById('btnFinalizar');
+    btn.style.display = isClosed ? 'none' : 'block';
+    if (!isClosed) { btn.disabled = false; btn.innerText = "CERRAR DÍA (ver totales)"; }
+    document.getElementById('employeeInput').disabled = isClosed;
+    document.getElementById('btnGuardarMenu').disabled = isClosed;
+    document.getElementById('coffeeQty').disabled = isClosed;
+    document.getElementById('sauceQty').disabled = isClosed;
+    document.querySelectorAll('.btn-coffee').forEach(function(b){ b.disabled = isClosed; });
+    document.querySelectorAll('.product-item').forEach(function(l){ isClosed ? l.classList.add('disabled-item') : l.classList.remove('disabled-item'); });
+    document.querySelectorAll('.products-grid input').forEach(function(i){ i.disabled = isClosed; });
+}
+
+// ── Editor de menú ──
+function abrirEditorMenu() {
+    document.getElementById('editorMenuSubtitle').innerText = 'Editando menú exclusivo de: ' + restauranteActual;
+    renderModalEditor();
+    document.getElementById('menuEditorModal').style.display = 'flex';
+}
+
+function renderModalEditor() {
+    var html = '';
+    Object.keys(currentMenu).forEach(function(rowId) {
+        html += '<div class="editor-category"><h4>' + categoryNames[rowId] + '</h4>';
+        currentMenu[rowId].forEach(function(prod, idx) {
+            html += '<div class="editor-item"><span>' + prod + '</span><button class="btn-delete" onclick="eliminarProductoMenu(\'' + rowId + '\',' + idx + ')">BORRAR</button></div>';
+        });
+        html += '<div class="editor-add-row"><input type="text" id="addInput_' + rowId + '" placeholder="Nuevo producto..."><button class="btn-add" onclick="añadirProductoMenu(\'' + rowId + '\')">AÑADIR</button></div></div>';
+    });
+    document.getElementById('editorContent').innerHTML = html;
+}
+
+function añadirProductoMenu(rowId) {
+    var input = document.getElementById('addInput_' + rowId);
+    var prod = input.value.trim();
+    if (!prod) return alert("Escribe el nombre del producto.");
+    if (currentMenu[rowId].indexOf(prod) !== -1) return alert("Ese producto ya existe.");
+    currentMenu[rowId].push(prod);
+    guardarMenuLocal();
+    renderModalEditor();
+}
+
+function eliminarProductoMenu(rowId, idx) {
+    if (confirm('¿Seguro que quieres borrar "' + currentMenu[rowId][idx] + '"?')) {
+        currentMenu[rowId].splice(idx, 1);
+        guardarMenuLocal();
+        renderModalEditor();
+    }
+}
+
+function guardarMenuLocal() {
+    todosLosMenus[restauranteActual] = currentMenu;
+    guardarMenusEnNube();
+    try { localStorage.setItem('mc_menus_backup', JSON.stringify(todosLosMenus)); } catch(e) {}
+}
+
+function resetearMenuBase() {
+    if (confirm('¿Resetear el menú de "' + restauranteActual + '" al menú base?\n\nLos demás restaurantes NO se tocarán.')) {
+        currentMenu = JSON.parse(JSON.stringify(defaultMenu));
+        guardarMenuLocal();
+        renderModalEditor();
+        alert("✅ Menú restablecido al menú base.");
+    }
+}
+
+function cerrarEditorMenu() {
+    document.getElementById('menuEditorModal').style.display = 'none';
+    renderMenu();
+    renderDayData();
+}
+
+// ── Cierre de día ──
+function abrirModalCierre() {
+    if (records.length === 0) return alert("No hay consumos para enviar hoy.");
+    document.getElementById('inputClosePin').value = '';
+    document.getElementById('closeDayModal').style.display = 'flex';
+}
+
+function confirmarCierre() {
+    var pin = document.getElementById('inputClosePin').value;
+    if (pin !== accesos[restauranteActual] && pin !== PIN_ADMIN && pin !== PIN_GESTOR) {
+        return alert("⚠️ Código PIN incorrecto para este restaurante.");
+    }
+    if (confirm("¿Has registrado la comida en la caja? Al aceptar se enviarán los datos y se cerrará el día.")) {
+        document.getElementById('closeDayModal').style.display = 'none';
+        var btn = document.getElementById('btnFinalizar');
+        btn.disabled = true;
+        btn.innerText = "ENVIANDO DATOS... ⏳";
+        var datos = records.map(function(r){ return {date:r.date,restaurant:r.restaurant,employee:r.employee,product:r.product,qty:r.qty}; });
+        fetch("https://hook.eu1.make.com/lrsa3ix4oxdxhky2xmqidrhoh8djvqgi", {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(datos)
+        }).then(function(){
+            // REALTIME DATABASE: Registrar cierre
+            db.ref("dias_cerrados/" + restauranteActual + "_" + selectedDate).set({cerrado: true});
+            window.scrollTo({top:0,behavior:'smooth'});
+            alert("✅ Día cerrado y datos enviados correctamente.");
+        }).catch(function(err){
+            console.error(err);
+            alert("❌ Error de conexión al enviar datos. Revisa el internet e inténtalo de nuevo.");
+            btn.disabled = false;
+            btn.innerText = "CERRAR DÍA (ver totales)";
+        });
+    }
+}
+
+// ── Consumos rápidos ──
+function addQuickItem(type, btnEl, qtyId) {
+    if (closedDays.indexOf(restauranteActual+"_"+selectedDate) !== -1) return alert("El día está cerrado.");
+    var qty = parseInt(document.getElementById(qtyId).value) || 1;
+    if (qty < 1) qty = 1;
+    var emp = document.getElementById('employeeInput').value.trim() || 'Servicio General';
+    
+    // REALTIME DATABASE: Guardar rápido
+    db.ref("consumos").push({
+        date: selectedDate,
+        restaurant: restauranteActual,
+        employee: emp,
+        product: type,
+        qty: qty,
+        timestamp: firebase.database.ServerValue.TIMESTAMP
+    });
+
+    var orig = btnEl.innerText;
+    btnEl.innerText = '¡+' + qty + ' Añadido!';
+    btnEl.style.backgroundColor = 'var(--mc-yellow)';
+    btnEl.style.borderColor = 'var(--mc-yellow)';
+    btnEl.style.fontWeight = '900';
+    setTimeout(function(){ btnEl.innerText=orig; btnEl.style.backgroundColor='#fafafa'; btnEl.style.borderColor='#eee'; btnEl.style.fontWeight='normal'; }, 800);
+    document.getElementById(qtyId).value = '1';
+}
+
+// ── Guardar menú completo ──
+function registerConsumo() {
+    if (closedDays.indexOf(restauranteActual+"_"+selectedDate) !== -1) return alert("El día está cerrado.");
+    var name = document.getElementById('employeeInput').value.trim();
+    if (!name) return alert("Nombre y apellido necesarios para guardar menú.");
+    var yaExiste = records.some(function(r){
+        var esRapido = (currentMenu.row5 && currentMenu.row5.indexOf(r.product)!==-1)||(currentMenu.row6 && currentMenu.row6.indexOf(r.product)!==-1);
+        return r.employee.toLowerCase()===name.toLowerCase() && !esRapido;
+    });
+    if (yaExiste) return alert("Ya has registrado tu menú hoy.");
+    var selected = Array.from(document.querySelectorAll('.products-grid input:checked')).map(function(rb){ return rb.value; });
+    if (selected.length === 0) return alert("Selecciona al menos un producto del menú.");
+    
+    var serverTimestamp = firebase.database.ServerValue.TIMESTAMP;
+    
+    selected.forEach(function(prod){
+        // REALTIME DATABASE: Guardar menú completo
+        db.ref("consumos").push({
+            date: selectedDate,
+            restaurant: restauranteActual,
+            employee: name,
+            product: prod,
+            qty: 1,
+            timestamp: serverTimestamp
+        });
+    });
+
+    document.getElementById('employeeInput').value = '';
+    document.querySelectorAll('.products-grid input').forEach(function(rb){ rb.checked=false; });
+    lastChecked = {};
+    window.scrollTo({top:0,behavior:'smooth'});
+    document.getElementById('graciasModal').style.display = 'flex';
+}
+
+// ── Render datos del día ──
+function getProductOrder(p) {
+    if (currentMenu.row1 && currentMenu.row1.indexOf(p)!==-1) return 1;
+    if (currentMenu.row2 && currentMenu.row2.indexOf(p)!==-1) return 2;
+    if (currentMenu.row3 && currentMenu.row3.indexOf(p)!==-1) return 3;
+    if (currentMenu.row4 && currentMenu.row4.indexOf(p)!==-1) return 4;
+    return 5;
+}
+
+function renderDayData() {
+    records.sort(function(a,b){ return (a.timestamp||0)-(b.timestamp||0); });
+    var grouped = {}, empNames = [];
+    records.forEach(function(r){
+        var rapid = (currentMenu.row5&&currentMenu.row5.indexOf(r.product)!==-1)||(currentMenu.row6&&currentMenu.row6.indexOf(r.product)!==-1);
+        if (!rapid) {
+            if (!grouped[r.employee]) { grouped[r.employee]=[]; empNames.push(r.employee); }
+            grouped[r.employee].push(r.product);
+        }
+    });
+    Object.keys(grouped).forEach(function(e){ grouped[e].sort(function(a,b){ return getProductOrder(a)-getProductOrder(b); }); });
+    var hc = document.getElementById('historyContainer');
+    if (empNames.length===0) {
+        hc.innerHTML = '<div style="color:#aaa;font-size:0.8rem;padding:5px;">Sin menús registrados hoy.</div>';
+    } else {
+        var rev = empNames.slice().reverse();
+        hc.innerHTML = rev.map(function(emp,i){
+            return '<div class="history-item"><div class="emp-name-col"><span style="color:var(--mc-green);margin-right:5px;">'+(rev.length-i)+'.</span><span class="emp-name-text">'+emp+'</span></div><span class="mc-separator">|</span><div class="food-list-col">'+grouped[emp].join(', ')+'</div></div>';
+        }).join('');
+    }
+    var lockKey = restauranteActual+"_"+selectedDate;
+    var isClosed = closedDays.indexOf(lockKey)!==-1;
+    var summary = {};
+    records.forEach(function(r){ summary[r.product]=(summary[r.product]||0)+(r.qty||1); });
+    var gridHtml = '';
+    Object.keys(currentMenu).forEach(function(rowId){
+        var items = Object.keys(summary).filter(function(p){ return currentMenu[rowId].indexOf(p)!==-1; });
+        if (items.length>0) {
+            gridHtml += '<div class="summary-cat-box"><h4>'+categoryNames[rowId]+'</h4>';
+            items.forEach(function(p){ gridHtml += '<div class="summary-item"><span>'+p+'</span><strong>'+(isClosed?summary[p]:'🔒')+'</strong></div>'; });
+            gridHtml += '</div>';
+        }
+    });
+    if (!isClosed && gridHtml!=='') gridHtml += '<p style="grid-column:1/-1;text-align:center;color:var(--mc-red);font-size:0.75rem;font-weight:bold;margin-top:0.5rem;opacity:0.8;">Cierra el día para ver las cantidades</p>';
+    document.getElementById('summaryGrid').innerHTML = gridHtml || '<p style="grid-column:1/-1;text-align:center;color:#aaa;font-size:0.8rem;">No hay consumos hoy.</p>';
+}
+
+// ── Escuchar datos Firebase (Realtime Database) ──
+function escucharDatosFirebase() {
+    // Apagamos los oyentes anteriores para no duplicar datos si cambiamos de fecha
+    if (refConsumos && cbConsumos) refConsumos.off('value', cbConsumos);
+    if (refCierres && cbCierres) refCierres.off('value', cbCierres);
+
+    // 1. Escuchar los consumos de la fecha seleccionada
+    refConsumos = db.ref("consumos").orderByChild("date").equalTo(selectedDate);
+    cbConsumos = refConsumos.on('value', function(snapshot) {
+        records = [];
+        snapshot.forEach(function(childSnapshot) {
+            var data = childSnapshot.val();
+            // Filtramos en JavaScript para asegurarnos de que es del restaurante actual
+            if (data.restaurant === restauranteActual) {
+                records.push(Object.assign({id: childSnapshot.key}, data));
+            }
+        });
+        renderDayData();
+    });
+
+    // 2. Escuchar si este día está cerrado
+    var lk = restauranteActual + "_" + selectedDate;
+    refCierres = db.ref("dias_cerrados/" + lk);
+    cbCierres = refCierres.on('value', function(snapshot) {
+        if (snapshot.exists()) { 
+            if (closedDays.indexOf(lk) === -1) closedDays.push(lk); 
+        } else { 
+            closedDays = closedDays.filter(function(d){ return d !== lk; }); 
+        }
+        localStorage.setItem('mc_closed_days_v7', JSON.stringify(closedDays));
+        updateUIState();
+        renderDayData();
+    });
+}
+
+// ── Navegación fechas NUEVA LOGICA SEGURA ──
+function changeDate(days) {
+    // Sumamos o restamos días usando nuestro "reloj interno" protegido
+    globalDate.setDate(globalDate.getDate() + parseInt(days, 10));
+    selectedDate = getFormattedDate(globalDate);
+    document.getElementById('datePicker').value = selectedDate;
+    updateUIState();
+    escucharDatosFirebase();
+}
+
+document.getElementById('datePicker').onchange = function(e) {
+    if (!e.target.value) {
+        // Si borran la fecha, ponemos la de hoy
+        globalDate = new Date();
+        globalDate.setHours(12, 0, 0, 0);
+    } else {
+        // Si cambian la fecha manualmente, actualizamos el reloj interno
+        var p = e.target.value.split('-');
+        if (p.length === 3) {
+            globalDate = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10), 12, 0, 0);
+        }
+    }
+    selectedDate = getFormattedDate(globalDate);
+    e.target.value = selectedDate;
+    updateUIState();
+    escucharDatosFirebase();
+};
+
+// ── ARRANQUE ──
+inicializarMenusLocales();
+cargarSelectRestaurantes(); // <--- Aquí es donde se pintan los restaurantes
+escucharConfiguracionNube(); // <--- Ahora esto no dará error y dejará que todo fluya
+
+</script>
+</body>
+</html>
