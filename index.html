@@ -157,7 +157,7 @@
     <div class="editor-card" style="max-width:350px;text-align:center;">
         <h2>ZONA RESTRINGIDA</h2>
         <p style="margin-bottom:1.5rem;font-size:0.9rem;font-weight:bold;color:#555;">Introduce el PIN Maestro para continuar.</p>
-        <input type="password" inputmode="numeric" pattern="[0-9]*" id="inputAdminPin" class="input-modal-pin" placeholder="PIN Maestro">
+        <input type="password" inputmode="numeric" pattern="[0-9]*" id="inputAdminPin" class="input-modal-pin" placeholder="PIN de Autorización">
         <button class="btn-main" onclick="verificarAdminPin()">ACCEDER</button>
         <button class="btn-close-modal" onclick="document.getElementById('adminAuthModal').style.display='none'" style="margin-top:0.8rem;background:#ccc;color:#333;">CANCELAR</button>
     </div>
@@ -218,28 +218,15 @@ const firebaseConfig = {
   measurementId: "G-S6WGFFGESL"
 };
 
-// Inicializar Firebase
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
 
-// ── PINs ── Solo existen aquí. Nunca se guardan en Firebase.
-var PIN_GESTOR = "0112";
-var PIN_ADMIN  = "9999";
-
-var accesos = {
-    "TORREVIEJA":        "0001",
-    "PETRER":            "0002",
-    "PUNTA MARINA":      "5814",
-    "LA ZENIA":          "9574",
-    "BENIJOFAR":         "0005",
-    "IBI":               "0006",
-    "YECLA":             "0007",
-    "TORREVIEJA PUERTO": "0008",
-    "PRUEBAS":           "6666",
-    "PLAZA MAR 2":       "0009"
-};
+// ── Variables Globales de Seguridad (Ocultas en código) ──
+var PIN_ADMINISTRADOR = "";
+var PIN_GERENTE = "";
+var accesos = {};
 
 // ── Menú base ──
 var defaultMenu = {
@@ -271,9 +258,7 @@ var todosLosMenus = {
     }
 };
 
-// Restaurantes cuyos menús NUNCA se sobreescriben desde Firebase
 var MENUS_FIJOS = [];
-
 var categoryNames = {row1:"PRINCIPALES",row2:"COMPLEMENTOS",row3:"BEBIDAS",row4:"POSTRES",row5:"CAFÉS",row6:"SALSAS"};
 
 var currentMenu = {};
@@ -283,19 +268,24 @@ var records = [];
 var closedDays = JSON.parse(localStorage.getItem('mc_closed_days_v7') || '[]');
 var lastChecked = {};
 
-// Variables para los listeners de FIRESTORE (Ya no son ref ni cb, son unsubscribe)
 var unsubscribeConsumos = null;
 var unsubscribeCierres = null;
 
-// ── NUEVO SISTEMA DE FECHAS (Global Date Object) ──
+// ── NUEVA LÓGICA DE FECHA PERSISTENTE ──
 var globalDate = new Date();
 globalDate.setHours(12, 0, 0, 0);
 
+// Miramos si la tablet tiene guardado un "día de trabajo" en curso
+var diaEnCurso = localStorage.getItem('mc_dia_trabajo');
+if (diaEnCurso) {
+    var p = diaEnCurso.split('-');
+    if (p.length === 3) {
+        globalDate = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10), 12, 0, 0);
+    }
+}
+
 function getFormattedDate(d) {
     var copia = new Date(d.getTime());
-    if (copia.getHours() < 5) {
-        copia.setDate(copia.getDate() - 1);
-    }
     return copia.getFullYear() + '-' + 
            String(copia.getMonth() + 1).padStart(2, '0') + '-' + 
            String(copia.getDate()).padStart(2, '0');
@@ -303,8 +293,33 @@ function getFormattedDate(d) {
 
 var selectedDate = getFormattedDate(globalDate);
 document.getElementById('datePicker').value = selectedDate;
+localStorage.setItem('mc_dia_trabajo', selectedDate); // Aseguramos que se guarde
 
-// ── Rellenar menús base para restaurantes sin menú propio ──
+// ── Sincronizar PINs desde Firebase ──
+function escucharPinesSeguridad() {
+    db.collection("config").doc("seguridad").onSnapshot(function(doc) {
+        if (doc.exists) {
+            var data = doc.data();
+            PIN_ADMINISTRADOR = data.PIN_ADMINISTRADOR;
+            PIN_GERENTE = data.PIN_GERENTE;
+            accesos = data.pines_locales || {};
+            
+            inicializarMenusLocales();
+            cargarSelectRestaurantes();
+        } else {
+            console.error("⚠️ No se encontró el documento de seguridad en la nube.");
+        }
+    });
+}
+
+function guardarPinesEnNube() {
+    db.collection("config").doc("seguridad").set({
+        PIN_ADMINISTRADOR: PIN_ADMINISTRADOR,
+        PIN_GERENTE: PIN_GERENTE,
+        pines_locales: accesos
+    }, {merge: true});
+}
+
 function inicializarMenusLocales() {
     Object.keys(accesos).forEach(function(rest) {
         if (!todosLosMenus[rest]) {
@@ -319,7 +334,6 @@ function inicializarMenusLocales() {
     });
 }
 
-// ── Cargar el select de restaurantes ──
 function cargarSelectRestaurantes() {
     var sel = document.getElementById('selectRestaurante');
     if (!sel) return;
@@ -331,7 +345,7 @@ function cargarSelectRestaurantes() {
     if (accesos[val]) sel.value = val;
 }
 
-// ── Sincronización Firestore ──
+// ── Sincronización Firestore de Menús ──
 function escucharConfiguracionNube() {
     db.collection("config").doc("app_config").onSnapshot(function(doc) {
         if (doc.exists) {
@@ -369,17 +383,20 @@ function escucharConfiguracionNube() {
 function guardarMenusEnNube() {
     db.collection("config").doc("app_config").set({menus: todosLosMenus}, {merge: true});
 }
-function guardarConfigEnNube() { guardarMenusEnNube(); }
 
 // ── Login ──
 function verificarLogin() {
     var rest = document.getElementById('selectRestaurante').value;
-    var pin  = document.getElementById('inputPin').value;
+    var pinIntroducido  = document.getElementById('inputPin').value;
     if (!rest) return alert("Por favor, selecciona tu restaurante.");
 
-    // Lógica nueva: Solo entra el PIN del restaurante o el Administrador (0112)
-    // El PIN de Gerente (9999) NO sirve para entrar directamente
-    if (accesos[rest] === pin || pin === PIN_GESTOR) {
+    // Creamos las tres "llaves" posibles
+    var esPinLocal = (accesos[rest] === pinIntroducido);
+    var esAdmin = (pinIntroducido === PIN_ADMINISTRADOR);
+    var esGerente = (pinIntroducido === PIN_GERENTE);
+
+    // CASO 1: Si mete el PIN del restaurante o el del Administrador (0112) -> PASA.
+    if (esPinLocal || esAdmin) {
         restauranteActual = rest;
         currentMenu = todosLosMenus[rest] || JSON.parse(JSON.stringify(defaultMenu));
         document.getElementById('loginScreen').style.display = 'none';
@@ -388,9 +405,15 @@ function verificarLogin() {
         document.getElementById('datePicker').value = selectedDate;
         renderMenu();
         updateUIState();
-        escucharDatosFirebase(); //
-    } else {
-        alert("⚠️ PIN incorrecto. Los gerentes deben entrar con el PIN del local.");
+        escucharDatosFirebase();
+    } 
+    // CASO 2: Si el Gerente intenta entrar con su PIN maestro (9999) -> BLOQUEADO.
+    else if (esGerente) {
+        alert("⚠️ El PIN de Gerente no sirve para entrar. Usa el PIN de este restaurante para acceder, y usa el tuyo (9999) solo para autorizar acciones dentro.");
+    } 
+    // CASO 3: Mete cualquier otra cosa.
+    else {
+        alert("⚠️ PIN incorrecto.");
     }
 }
 
@@ -404,39 +427,36 @@ function prepararAdminAuth(accion) {
 function verificarAdminPin() {
     var pin = document.getElementById('inputAdminPin').value;
     
-    var esGerente = (pin === PIN_ADMIN);   // 9999
-    var esAdmin   = (pin === PIN_GESTOR);  // 0112
+    var esGerente = (pin === PIN_GERENTE);
+    var esAdmin   = (pin === PIN_ADMINISTRADOR);
 
     if (accionAdminPendiente === 'panel') {
-        // Si intentas gestionar restaurantes desde fuera (0112 requerido)
         if (document.getElementById('loginScreen').style.display !== 'none') {
             if (esAdmin) {
                 document.getElementById('adminAuthModal').style.display = 'none';
                 abrirGestorPINs();
             } else {
-                alert("⚠️ Solo el Administrador Principal (0112) puede gestionar la lista de locales.");
+                alert("⚠️ Solo el Administrador Principal puede gestionar la lista de locales.");
             }
         } 
-        // Si intentas añadir alimentos/editar menú desde dentro
         else {
             if (esGerente || esAdmin) {
                 document.getElementById('adminAuthModal').style.display = 'none';
                 abrirEditorMenu();
             } else {
-                alert("⚠️ PIN de autorización incorrecto (Se requiere Gerente o Admin).");
+                alert("⚠️ Se requiere PIN de Gerente o Administrador.");
             }
         }
     } 
-    // Para reabrir un día ya cerrado
     else if (accionAdminPendiente === 'reabrir') {
         if (esGerente || esAdmin) {
             document.getElementById('adminAuthModal').style.display = 'none';
-            db.collection("dias_cerrados").doc(restauranteActual + "_" + selectedDate).delete() //
+            db.collection("dias_cerrados").doc(restauranteActual + "_" + selectedDate).delete()
               .then(function() {
                   alert("🔓 Día reabierto con éxito.");
               });
         } else {
-            alert("⚠️ No tienes permiso para reabrir el día.");
+            alert("⚠️ Solo un Gerente o Administrador puede reabrir el día.");
         }
     }
 }
@@ -460,6 +480,7 @@ function eliminarRestaurante(rest) {
     if (confirm('¿Seguro que quieres eliminar "' + rest + '"?')) {
         delete accesos[rest];
         delete todosLosMenus[rest];
+        guardarPinesEnNube();
         guardarMenusEnNube();
         cargarSelectRestaurantes();
         abrirGestorPINs();
@@ -473,6 +494,7 @@ function añadirRestaurante() {
     if (accesos[name]) return alert("Ese restaurante ya existe.");
     accesos[name] = pin;
     todosLosMenus[name] = JSON.parse(JSON.stringify(defaultMenu));
+    guardarPinesEnNube();
     guardarMenusEnNube();
     cargarSelectRestaurantes();
     document.getElementById('newRestName').value = '';
@@ -486,6 +508,7 @@ function guardarPINs() {
         var el = document.getElementById('pinInput_' + sid);
         if (el && el.value.trim() !== '') accesos[rest] = el.value.trim();
     });
+    guardarPinesEnNube();
     alert("✅ Contraseñas actualizadas correctamente.");
     cerrarGestorPINs();
 }
@@ -589,7 +612,6 @@ function eliminarProductoMenu(rowId, idx) {
 function guardarMenuLocal() {
     todosLosMenus[restauranteActual] = currentMenu;
     guardarMenusEnNube();
-    try { localStorage.setItem('mc_menus_backup', JSON.stringify(todosLosMenus)); } catch(e) {}
 }
 
 function resetearMenuBase() {
@@ -616,7 +638,7 @@ function abrirModalCierre() {
 
 function confirmarCierre() {
     var pin = document.getElementById('inputClosePin').value;
-    if (pin !== accesos[restauranteActual] && pin !== PIN_ADMIN && pin !== PIN_GESTOR) {
+    if (pin !== accesos[restauranteActual] && pin !== PIN_GERENTE && pin !== PIN_ADMINISTRADOR) {
         return alert("⚠️ Código PIN incorrecto para este restaurante.");
     }
     if (confirm("¿Has registrado la comida en la caja? Al aceptar se enviarán los datos y se cerrará el día.")) {
@@ -628,10 +650,14 @@ function confirmarCierre() {
         fetch("https://hook.eu1.make.com/lrsa3ix4oxdxhky2xmqidrhoh8djvqgi", {
             method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(datos)
         }).then(function(){
-            // FIRESTORE: Registrar cierre
             db.collection("dias_cerrados").doc(restauranteActual + "_" + selectedDate).set({cerrado: true});
             window.scrollTo({top:0,behavior:'smooth'});
-            alert("✅ Día cerrado y datos enviados correctamente.");
+            
+            alert("✅ Día cerrado y datos enviados. Avanzando turno al día siguiente...");
+            
+            // NUEVA LÓGICA: Avanzamos automáticamente un día en el calendario de la app
+            changeDate(1);
+            
         }).catch(function(err){
             console.error(err);
             alert("❌ Error de conexión al enviar datos. Revisa el internet e inténtalo de nuevo.");
@@ -648,7 +674,6 @@ function addQuickItem(type, btnEl, qtyId) {
     if (qty < 1) qty = 1;
     var emp = document.getElementById('employeeInput').value.trim() || 'Servicio General';
     
-    // FIRESTORE: Guardar rápido
     db.collection("consumos").add({
         date: selectedDate,
         restaurant: restauranteActual,
@@ -683,7 +708,6 @@ function registerConsumo() {
     var serverTimestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     selected.forEach(function(prod){
-        // FIRESTORE: Guardar menú completo
         db.collection("consumos").add({
             date: selectedDate,
             restaurant: restauranteActual,
@@ -753,11 +777,9 @@ function renderDayData() {
 
 // ── Escuchar datos Firestore ──
 function escucharDatosFirebase() {
-    // Apagamos los oyentes anteriores (Con Firestore es usando la función devuelta)
     if (unsubscribeConsumos) unsubscribeConsumos();
     if (unsubscribeCierres) unsubscribeCierres();
 
-    // 1. Escuchar los consumos de la fecha seleccionada
     unsubscribeConsumos = db.collection("consumos")
         .where("date", "==", selectedDate)
         .onSnapshot(function(snapshot) {
@@ -771,7 +793,6 @@ function escucharDatosFirebase() {
             renderDayData();
         });
 
-    // 2. Escuchar si este día está cerrado
     var lk = restauranteActual + "_" + selectedDate;
     unsubscribeCierres = db.collection("dias_cerrados").doc(lk).onSnapshot(function(doc) {
         if (doc.exists) { 
@@ -785,11 +806,15 @@ function escucharDatosFirebase() {
     });
 }
 
-// ── Navegación fechas NUEVA LOGICA SEGURA ──
+// ── Navegación fechas ──
 function changeDate(days) {
     globalDate.setDate(globalDate.getDate() + parseInt(days, 10));
     selectedDate = getFormattedDate(globalDate);
     document.getElementById('datePicker').value = selectedDate;
+    
+    // NUEVO: Guardar el nuevo día en la memoria de la tablet
+    localStorage.setItem('mc_dia_trabajo', selectedDate); 
+    
     updateUIState();
     escucharDatosFirebase();
 }
@@ -806,13 +831,17 @@ document.getElementById('datePicker').onchange = function(e) {
     }
     selectedDate = getFormattedDate(globalDate);
     e.target.value = selectedDate;
+    
+    // NUEVO: Guardar el día manual en la memoria de la tablet
+    localStorage.setItem('mc_dia_trabajo', selectedDate); 
+    
     updateUIState();
     escucharDatosFirebase();
 };
 
 // ── ARRANQUE ──
-inicializarMenusLocales();
-cargarSelectRestaurantes(); 
+// Empezamos sincronizando los PINs. Una vez descargados, carga el resto.
+escucharPinesSeguridad(); 
 escucharConfiguracionNube(); 
 
 </script>
