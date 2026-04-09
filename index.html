@@ -13,7 +13,7 @@
     <meta name="theme-color" content="#004731">
     
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
     
     <style>
         :root { --mc-green:#004731; --mc-yellow:rgb(255,204,0); --mc-white:#ffffff; --text-dark:#222222; --border-light:#e0e0e0; --mc-red:#d32f2f; }
@@ -206,11 +206,10 @@
 </div>
 
 <script>
-// CONFIGURACIÓN DE FIREBASE ACTUALIZADA
-var firebaseConfig = {
+// CONFIGURACIÓN DE FIREBASE ACTUALIZADA (Firestore)
+const firebaseConfig = {
   apiKey: "AIzaSyAGD13DpZvyAaaV-60OS0_LZPL6ZBwfmOo",
   authDomain: "appcomidaempleados.firebaseapp.com",
-  databaseURL: "https://appcomidaempleados-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "appcomidaempleados",
   storageBucket: "appcomidaempleados.firebasestorage.app",
   messagingSenderId: "1075222714539",
@@ -218,9 +217,11 @@ var firebaseConfig = {
   measurementId: "G-S6WGFFGESL"
 };
 
-// Inicializamos la app y Realtime Database
-firebase.initializeApp(firebaseConfig);
-var db = firebase.database();
+// Inicializar Firebase
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
+const db = firebase.firestore();
 
 // ── PINs ── Solo existen aquí. Nunca se guardan en Firebase.
 var PIN_GESTOR = "0112";
@@ -270,7 +271,7 @@ var todosLosMenus = {
 };
 
 // Restaurantes cuyos menús NUNCA se sobreescriben desde Firebase
-var MENUS_FIJOS = ["PUNTA MARINA","LA ZENIA"];
+var MENUS_FIJOS = [];
 
 var categoryNames = {row1:"PRINCIPALES",row2:"COMPLEMENTOS",row3:"BEBIDAS",row4:"POSTRES",row5:"CAFÉS",row6:"SALSAS"};
 
@@ -281,9 +282,9 @@ var records = [];
 var closedDays = JSON.parse(localStorage.getItem('mc_closed_days_v7') || '[]');
 var lastChecked = {};
 
-// Variables para los listeners de Realtime Database
-var refConsumos, cbConsumos;
-var refCierres, cbCierres;
+// Variables para los listeners de FIRESTORE (Ya no son ref ni cb, son unsubscribe)
+var unsubscribeConsumos = null;
+var unsubscribeCierres = null;
 
 // ── NUEVO SISTEMA DE FECHAS (Global Date Object) ──
 var globalDate = new Date();
@@ -291,7 +292,6 @@ globalDate.setHours(12, 0, 0, 0);
 
 function getFormattedDate(d) {
     var copia = new Date(d.getTime());
-    // Si la hora es entre las 00:00 y las 04:59, restamos un día
     if (copia.getHours() < 5) {
         copia.setDate(copia.getDate() - 1);
     }
@@ -330,21 +330,19 @@ function cargarSelectRestaurantes() {
     if (accesos[val]) sel.value = val;
 }
 
-// ── Sincronización Firebase (Realtime Database) ──
+// ── Sincronización Firestore ──
 function escucharConfiguracionNube() {
-    db.ref("config/app_config").on('value', function(snapshot) {
-        if (snapshot.exists()) {
-            var data = snapshot.val();
+    db.collection("config").doc("app_config").onSnapshot(function(doc) {
+        if (doc.exists) {
+            var data = doc.data();
             if (data && data.menus) {
                 Object.keys(data.menus).forEach(function(rest) {
-                    // Solo sobreescribir si NO es menú fijo
                     if (MENUS_FIJOS.indexOf(rest) === -1) {
                         todosLosMenus[rest] = data.menus[rest];
                     }
                 });
             }
         }
-        // Rellenar huecos
         Object.keys(accesos).forEach(function(rest) {
             if (!todosLosMenus[rest]) {
                 todosLosMenus[rest] = JSON.parse(JSON.stringify(defaultMenu));
@@ -356,10 +354,8 @@ function escucharConfiguracionNube() {
                 });
             }
         });
-        // Subir estado correcto a Firebase
         guardarMenusEnNube();
         
-        // Refrescar UI si hay restaurante activo
         if (restauranteActual) {
             currentMenu = todosLosMenus[restauranteActual] || JSON.parse(JSON.stringify(defaultMenu));
             renderMenu();
@@ -370,7 +366,7 @@ function escucharConfiguracionNube() {
 }
 
 function guardarMenusEnNube() {
-    db.ref("config/app_config").update({menus: todosLosMenus});
+    db.collection("config").doc("app_config").set({menus: todosLosMenus}, {merge: true});
 }
 function guardarConfigEnNube() { guardarMenusEnNube(); }
 
@@ -379,7 +375,10 @@ function verificarLogin() {
     var rest = document.getElementById('selectRestaurante').value;
     var pin  = document.getElementById('inputPin').value;
     if (!rest) return alert("Por favor, selecciona tu restaurante.");
-    if (accesos[rest] === pin || pin === PIN_ADMIN || pin === PIN_GESTOR) {
+
+    // Lógica nueva: Solo entra el PIN del restaurante o el Administrador (0112)
+    // El PIN de Gerente (9999) NO sirve para entrar directamente
+    if (accesos[rest] === pin || pin === PIN_GESTOR) {
         restauranteActual = rest;
         currentMenu = todosLosMenus[rest] || JSON.parse(JSON.stringify(defaultMenu));
         document.getElementById('loginScreen').style.display = 'none';
@@ -388,9 +387,9 @@ function verificarLogin() {
         document.getElementById('datePicker').value = selectedDate;
         renderMenu();
         updateUIState();
-        escucharDatosFirebase();
+        escucharDatosFirebase(); //
     } else {
-        alert("⚠️ PIN incorrecto para el restaurante seleccionado.");
+        alert("⚠️ PIN incorrecto. Los gerentes deben entrar con el PIN del local.");
     }
 }
 
@@ -403,29 +402,40 @@ function prepararAdminAuth(accion) {
 
 function verificarAdminPin() {
     var pin = document.getElementById('inputAdminPin').value;
+    
+    var esGerente = (pin === PIN_ADMIN);   // 9999
+    var esAdmin   = (pin === PIN_GESTOR);  // 0112
+
     if (accionAdminPendiente === 'panel') {
+        // Si intentas gestionar restaurantes desde fuera (0112 requerido)
         if (document.getElementById('loginScreen').style.display !== 'none') {
-            if (pin === PIN_GESTOR) {
+            if (esAdmin) {
                 document.getElementById('adminAuthModal').style.display = 'none';
                 abrirGestorPINs();
             } else {
-                alert("⚠️ PIN maestro incorrecto para el Gestor de Restaurantes.");
+                alert("⚠️ Solo el Administrador Principal (0112) puede gestionar la lista de locales.");
             }
-        } else {
-            if (pin === PIN_ADMIN) {
+        } 
+        // Si intentas añadir alimentos/editar menú desde dentro
+        else {
+            if (esGerente || esAdmin) {
                 document.getElementById('adminAuthModal').style.display = 'none';
                 abrirEditorMenu();
             } else {
-                alert("⚠️ PIN maestro incorrecto para el Gestor de Menú.");
+                alert("⚠️ PIN de autorización incorrecto (Se requiere Gerente o Admin).");
             }
         }
-    } else if (accionAdminPendiente === 'reabrir') {
-        if (pin === PIN_ADMIN) {
+    } 
+    // Para reabrir un día ya cerrado
+    else if (accionAdminPendiente === 'reabrir') {
+        if (esGerente || esAdmin) {
             document.getElementById('adminAuthModal').style.display = 'none';
-            db.ref("dias_cerrados/" + restauranteActual + "_" + selectedDate).remove();
-            alert("🔓 Día reabierto correctamente.");
+            db.collection("dias_cerrados").doc(restauranteActual + "_" + selectedDate).delete() //
+              .then(function() {
+                  alert("🔓 Día reabierto con éxito.");
+              });
         } else {
-            alert("⚠️ PIN maestro incorrecto para reabrir el día.");
+            alert("⚠️ No tienes permiso para reabrir el día.");
         }
     }
 }
@@ -617,8 +627,8 @@ function confirmarCierre() {
         fetch("https://hook.eu1.make.com/lrsa3ix4oxdxhky2xmqidrhoh8djvqgi", {
             method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(datos)
         }).then(function(){
-            // REALTIME DATABASE: Registrar cierre
-            db.ref("dias_cerrados/" + restauranteActual + "_" + selectedDate).set({cerrado: true});
+            // FIRESTORE: Registrar cierre
+            db.collection("dias_cerrados").doc(restauranteActual + "_" + selectedDate).set({cerrado: true});
             window.scrollTo({top:0,behavior:'smooth'});
             alert("✅ Día cerrado y datos enviados correctamente.");
         }).catch(function(err){
@@ -637,14 +647,14 @@ function addQuickItem(type, btnEl, qtyId) {
     if (qty < 1) qty = 1;
     var emp = document.getElementById('employeeInput').value.trim() || 'Servicio General';
     
-    // REALTIME DATABASE: Guardar rápido
-    db.ref("consumos").push({
+    // FIRESTORE: Guardar rápido
+    db.collection("consumos").add({
         date: selectedDate,
         restaurant: restauranteActual,
         employee: emp,
         product: type,
         qty: qty,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
     });
 
     var orig = btnEl.innerText;
@@ -669,11 +679,11 @@ function registerConsumo() {
     var selected = Array.from(document.querySelectorAll('.products-grid input:checked')).map(function(rb){ return rb.value; });
     if (selected.length === 0) return alert("Selecciona al menos un producto del menú.");
     
-    var serverTimestamp = firebase.database.ServerValue.TIMESTAMP;
+    var serverTimestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     selected.forEach(function(prod){
-        // REALTIME DATABASE: Guardar menú completo
-        db.ref("consumos").push({
+        // FIRESTORE: Guardar menú completo
+        db.collection("consumos").add({
             date: selectedDate,
             restaurant: restauranteActual,
             employee: name,
@@ -700,7 +710,11 @@ function getProductOrder(p) {
 }
 
 function renderDayData() {
-    records.sort(function(a,b){ return (a.timestamp||0)-(b.timestamp||0); });
+    records.sort(function(a,b){
+        var timeA = a.timestamp ? (a.timestamp.toMillis ? a.timestamp.toMillis() : a.timestamp) : 0;
+        var timeB = b.timestamp ? (b.timestamp.toMillis ? b.timestamp.toMillis() : b.timestamp) : 0;
+        return timeA - timeB; 
+    });
     var grouped = {}, empNames = [];
     records.forEach(function(r){
         var rapid = (currentMenu.row5&&currentMenu.row5.indexOf(r.product)!==-1)||(currentMenu.row6&&currentMenu.row6.indexOf(r.product)!==-1);
@@ -736,31 +750,30 @@ function renderDayData() {
     document.getElementById('summaryGrid').innerHTML = gridHtml || '<p style="grid-column:1/-1;text-align:center;color:#aaa;font-size:0.8rem;">No hay consumos hoy.</p>';
 }
 
-// ── Escuchar datos Firebase (Realtime Database) ──
+// ── Escuchar datos Firestore ──
 function escucharDatosFirebase() {
-    // Apagamos los oyentes anteriores para no duplicar datos si cambiamos de fecha
-    if (refConsumos && cbConsumos) refConsumos.off('value', cbConsumos);
-    if (refCierres && cbCierres) refCierres.off('value', cbCierres);
+    // Apagamos los oyentes anteriores (Con Firestore es usando la función devuelta)
+    if (unsubscribeConsumos) unsubscribeConsumos();
+    if (unsubscribeCierres) unsubscribeCierres();
 
     // 1. Escuchar los consumos de la fecha seleccionada
-    refConsumos = db.ref("consumos").orderByChild("date").equalTo(selectedDate);
-    cbConsumos = refConsumos.on('value', function(snapshot) {
-        records = [];
-        snapshot.forEach(function(childSnapshot) {
-            var data = childSnapshot.val();
-            // Filtramos en JavaScript para asegurarnos de que es del restaurante actual
-            if (data.restaurant === restauranteActual) {
-                records.push(Object.assign({id: childSnapshot.key}, data));
-            }
+    unsubscribeConsumos = db.collection("consumos")
+        .where("date", "==", selectedDate)
+        .onSnapshot(function(snapshot) {
+            records = [];
+            snapshot.forEach(function(doc) {
+                var data = doc.data();
+                if (data.restaurant === restauranteActual) {
+                    records.push(Object.assign({id: doc.id}, data));
+                }
+            });
+            renderDayData();
         });
-        renderDayData();
-    });
 
     // 2. Escuchar si este día está cerrado
     var lk = restauranteActual + "_" + selectedDate;
-    refCierres = db.ref("dias_cerrados/" + lk);
-    cbCierres = refCierres.on('value', function(snapshot) {
-        if (snapshot.exists()) { 
+    unsubscribeCierres = db.collection("dias_cerrados").doc(lk).onSnapshot(function(doc) {
+        if (doc.exists) { 
             if (closedDays.indexOf(lk) === -1) closedDays.push(lk); 
         } else { 
             closedDays = closedDays.filter(function(d){ return d !== lk; }); 
@@ -773,7 +786,6 @@ function escucharDatosFirebase() {
 
 // ── Navegación fechas NUEVA LOGICA SEGURA ──
 function changeDate(days) {
-    // Sumamos o restamos días usando nuestro "reloj interno" protegido
     globalDate.setDate(globalDate.getDate() + parseInt(days, 10));
     selectedDate = getFormattedDate(globalDate);
     document.getElementById('datePicker').value = selectedDate;
@@ -783,11 +795,9 @@ function changeDate(days) {
 
 document.getElementById('datePicker').onchange = function(e) {
     if (!e.target.value) {
-        // Si borran la fecha, ponemos la de hoy
         globalDate = new Date();
         globalDate.setHours(12, 0, 0, 0);
     } else {
-        // Si cambian la fecha manualmente, actualizamos el reloj interno
         var p = e.target.value.split('-');
         if (p.length === 3) {
             globalDate = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10), 12, 0, 0);
@@ -801,8 +811,8 @@ document.getElementById('datePicker').onchange = function(e) {
 
 // ── ARRANQUE ──
 inicializarMenusLocales();
-cargarSelectRestaurantes(); // <--- Aquí es donde se pintan los restaurantes
-escucharConfiguracionNube(); // <--- Ahora esto no dará error y dejará que todo fluya
+cargarSelectRestaurantes(); 
+escucharConfiguracionNube(); 
 
 </script>
 </body>
